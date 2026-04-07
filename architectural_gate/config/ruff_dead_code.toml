@@ -1,0 +1,19 @@
+# TODO-2: Pinned rules for "dead code" style signals (unused imports, unused vars).
+# Ruff version should be pinned in deployment (e.g. requirements-lock).
+
+line-length = 120
+target-version = "py310"
+
+[lint]
+select = [
+  "F401",  # unused import
+  "F841",  # unused variable
+]
+
+exclude = [
+  ".git",
+  "__pycache__",
+  ".venv",
+  "venv",
+  "node_modules",
+]

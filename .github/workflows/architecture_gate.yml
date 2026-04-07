@@ -1,0 +1,28 @@
+name: Architecture Gate
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  run-architecture-gate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install mcpdoc (editable, includes architectural_gate)
+        run: pip install -e .
+
+      - name: Run Architecture Gate
+        run: python -m architectural_gate

@@ -1,0 +1,16 @@
+# Preferred: `architectural.thresholds` (see README). Legacy `architectural_gate` still supported.
+architectural:
+  thresholds:
+    scope_min: 0.7
+    blast_ratio_min: 0.5
+    api_surface_min: 1.0
+    max_new_dependencies: 0
+    max_dead_code: 2
+  allow_new_dependencies: false
+  allow_api_breaks: false
+
+# Legacy (maps to the same effective thresholds):
+# architectural_gate:
+#   scope_threshold: 0.7          # -> scope_min
+#   blast_threshold: 2.0          # -> blast_ratio_min = 1/2.0
+#   dead_code_threshold: 2        # -> max_dead_code
