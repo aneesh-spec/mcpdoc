@@ -81,12 +81,16 @@ def total_changed_loc(diff_text: str) -> int:
     return a + d
 
 
-def filter_auto_generated_files(files: set[str], extra_patterns: tuple[str, ...] = ()) -> set[str]:
+def filter_auto_generated_files(
+    files: set[str], extra_patterns: tuple[str, ...] = ()
+) -> set[str]:
     """Return only files that are NOT auto-generated."""
     return {f for f in files if not is_auto_generated(f, extra_patterns)}
 
 
-def total_changed_loc_filtered(diff_text: str, extra_patterns: tuple[str, ...] = ()) -> tuple[int, list[str]]:
+def total_changed_loc_filtered(
+    diff_text: str, extra_patterns: tuple[str, ...] = ()
+) -> tuple[int, list[str]]:
     """LOC count excluding auto-generated files. Returns (loc, list_of_excluded_files)."""
     if not diff_text:
         return 0, []
@@ -103,7 +107,9 @@ def total_changed_loc_filtered(diff_text: str, extra_patterns: tuple[str, ...] =
             m = _DIFF_HEADER_NEW.match(line)
             if m:
                 current_file = normalize_path_from_diff_header(m.group(1))
-                skip_current = current_file != "/dev/null" and is_auto_generated(current_file, extra_patterns)
+                skip_current = current_file != "/dev/null" and is_auto_generated(
+                    current_file, extra_patterns
+                )
                 if skip_current and current_file not in excluded:
                     excluded.append(current_file)
             continue

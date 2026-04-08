@@ -9,7 +9,7 @@ from typing import Any, Mapping
 
 # Files that are auto-generated and should be excluded from scope/blast scoring by default.
 AUTO_GENERATED_PATTERNS: tuple[str, ...] = (
-    "*.lock",           # uv.lock, package-lock.json, Cargo.lock, yarn.lock, Gemfile.lock
+    "*.lock",  # uv.lock, package-lock.json, Cargo.lock, yarn.lock, Gemfile.lock
     "uv.lock",
     "package-lock.json",
     "yarn.lock",
@@ -20,7 +20,7 @@ AUTO_GENERATED_PATTERNS: tuple[str, ...] = (
     "Pipfile.lock",
     "*.min.js",
     "*.min.css",
-    "*.pb.go",          # protobuf generated
+    "*.pb.go",  # protobuf generated
     "*.pb.py",
     "*_pb2.py",
     "*.generated.*",
@@ -83,10 +83,14 @@ class GateThresholds:
     max_dead_code: int = 2
     allow_new_dependencies: bool = False
     allow_api_breaks: bool = False
-    exclude_patterns: tuple[str, ...] = field(default_factory=tuple)  # extra glob patterns to exclude from scope/blast
+    exclude_patterns: tuple[str, ...] = field(
+        default_factory=tuple
+    )  # extra glob patterns to exclude from scope/blast
 
     @classmethod
-    def from_task_config(cls, raw: Mapping[str, Any] | None) -> tuple["GateThresholds", dict[str, Any]]:
+    def from_task_config(
+        cls, raw: Mapping[str, Any] | None
+    ) -> tuple["GateThresholds", dict[str, Any]]:
         """Returns (thresholds, override_record for logging)."""
         defaults = cls()
         if not raw:
@@ -106,7 +110,11 @@ class GateThresholds:
         overrides: dict[str, Any] = {}
 
         try:
-            scope_min = float(th["scope_min"]) if "scope_min" in th else float(leg.get("scope_threshold", defaults.scope_min))
+            scope_min = (
+                float(th["scope_min"])
+                if "scope_min" in th
+                else float(leg.get("scope_threshold", defaults.scope_min))
+            )
         except (TypeError, ValueError):
             scope_min = defaults.scope_min
         if "scope_min" in th:
@@ -128,8 +136,10 @@ class GateThresholds:
             blast_ratio_min = defaults.blast_ratio_min
 
         try:
-            api_surface_min = float(th["api_surface_min"]) if "api_surface_min" in th else float(
-                leg.get("api_surface_min", defaults.api_surface_min)
+            api_surface_min = (
+                float(th["api_surface_min"])
+                if "api_surface_min" in th
+                else float(leg.get("api_surface_min", defaults.api_surface_min))
             )
         except (TypeError, ValueError):
             api_surface_min = defaults.api_surface_min
@@ -137,8 +147,10 @@ class GateThresholds:
             overrides["api_surface_min"] = api_surface_min
 
         try:
-            max_new = int(th["max_new_dependencies"]) if "max_new_dependencies" in th else int(
-                leg.get("max_new_dependencies", defaults.max_new_dependencies)
+            max_new = (
+                int(th["max_new_dependencies"])
+                if "max_new_dependencies" in th
+                else int(leg.get("max_new_dependencies", defaults.max_new_dependencies))
             )
         except (TypeError, ValueError):
             max_new = defaults.max_new_dependencies
@@ -146,23 +158,33 @@ class GateThresholds:
             overrides["max_new_dependencies"] = max_new
 
         try:
-            max_dead = int(th["max_dead_code"]) if "max_dead_code" in th else int(
-                leg.get("dead_code_threshold", defaults.max_dead_code)
+            max_dead = (
+                int(th["max_dead_code"])
+                if "max_dead_code" in th
+                else int(leg.get("dead_code_threshold", defaults.max_dead_code))
             )
         except (TypeError, ValueError):
             max_dead = defaults.max_dead_code
         if "max_dead_code" in th:
             overrides["max_dead_code"] = max_dead
 
-        allow_new = bool(arch.get("allow_new_dependencies")) if "allow_new_dependencies" in arch else bool(
-            leg.get("allow_new_dependencies", defaults.allow_new_dependencies)
+        allow_new = (
+            bool(arch.get("allow_new_dependencies"))
+            if "allow_new_dependencies" in arch
+            else bool(
+                leg.get("allow_new_dependencies", defaults.allow_new_dependencies)
+            )
         )
-        allow_api = bool(arch.get("allow_api_breaks")) if "allow_api_breaks" in arch else bool(
-            leg.get("allow_api_breaks", defaults.allow_api_breaks)
+        allow_api = (
+            bool(arch.get("allow_api_breaks"))
+            if "allow_api_breaks" in arch
+            else bool(leg.get("allow_api_breaks", defaults.allow_api_breaks))
         )
 
         raw_excl = arch.get("exclude_patterns") or leg.get("exclude_patterns") or []
-        exclude_patterns: tuple[str, ...] = tuple(raw_excl) if isinstance(raw_excl, list) else ()
+        exclude_patterns: tuple[str, ...] = (
+            tuple(raw_excl) if isinstance(raw_excl, list) else ()
+        )
         if exclude_patterns:
             overrides["exclude_patterns"] = list(exclude_patterns)
 

@@ -84,5 +84,7 @@ def get_api_adapter(language: str) -> LanguageAPIAdapter | None:
         return GoAPIAdapter()
     if key in ("rust", "rs"):
         return RustAPIAdapter()
-    logger.warning("No API adapter for language=%r; API check skipped (neutral).", language)
+    logger.warning(
+        "No API adapter for language=%r; API check skipped (neutral).", language
+    )
     return None

@@ -13,8 +13,12 @@ from architectural_gate.models import RepoSnapshot
 
 def _parse_repo_roots() -> tuple[Path | None, Path | None]:
     """Initial (baseline) and changed trees — drives API / deps / dead-code before vs after."""
-    initial = os.environ.get("ARCH_GATE_REPO_INITIAL") or os.environ.get("ARCH_GATE_REPO_BEFORE")
-    changed = os.environ.get("ARCH_GATE_REPO_CHANGED") or os.environ.get("ARCH_GATE_REPO_ROOT")
+    initial = os.environ.get("ARCH_GATE_REPO_INITIAL") or os.environ.get(
+        "ARCH_GATE_REPO_BEFORE"
+    )
+    changed = os.environ.get("ARCH_GATE_REPO_CHANGED") or os.environ.get(
+        "ARCH_GATE_REPO_ROOT"
+    )
     before_p = Path(initial).resolve() if initial else None
     after_p = Path(changed).resolve() if changed else None
     if before_p and not before_p.is_dir():
@@ -35,7 +39,14 @@ def _repo_snapshot(before_p: Path | None, after_p: Path | None) -> RepoSnapshot:
 def _unified_diff_from_dir_trees(before: Path, after: Path) -> str:
     """Unified diff between two directory trees (uses ``git diff --no-index``)."""
     proc = subprocess.run(
-        ["git", "diff", "--no-index", "--minimal", str(before.resolve()), str(after.resolve())],
+        [
+            "git",
+            "diff",
+            "--no-index",
+            "--minimal",
+            str(before.resolve()),
+            str(after.resolve()),
+        ],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -73,7 +84,9 @@ def main() -> int:
       ARCH_GATE_TASK_CONFIG    task YAML path (optional)
     """
     before_p, after_p = _parse_repo_roots()
-    change_path = os.environ.get("ARCH_GATE_CHANGE_DIFF") or os.environ.get("ARCH_GATE_AGENT_DIFF")
+    change_path = os.environ.get("ARCH_GATE_CHANGE_DIFF") or os.environ.get(
+        "ARCH_GATE_AGENT_DIFF"
+    )
     creator_path = os.environ.get("ARCH_GATE_CREATOR_DIFF")
     cfg = os.environ.get("ARCH_GATE_TASK_CONFIG")
     log_path = os.environ.get("ARCH_GATE_JSON_LOG")
@@ -88,7 +101,9 @@ def main() -> int:
     has_work = bool(change_path) or (before_p is not None and after_p is not None)
 
     self_ref = not creator_path
-    creator_patch = Path(creator_path).read_text(encoding="utf-8") if creator_path else ""
+    creator_patch = (
+        Path(creator_path).read_text(encoding="utf-8") if creator_path else ""
+    )
     task_config = Path(cfg) if cfg else {}
     repo_root = after_p
     snap = _repo_snapshot(before_p, after_p)

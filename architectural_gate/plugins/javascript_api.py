@@ -34,10 +34,14 @@ class JavaScriptAPIAdapter(LanguageAPIAdapter):
         return {
             p
             for p in snapshot_paths
-            if p.endswith((".js", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts", ".jsx"))
+            if p.endswith(
+                (".js", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts", ".jsx")
+            )
         }
 
-    def extract_public_surface(self, rel_path: str, content: str | None) -> dict[str, Any]:
+    def extract_public_surface(
+        self, rel_path: str, content: str | None
+    ) -> dict[str, Any]:
         out: dict[str, Any] = {"path": rel_path, "exports": []}
         if not content:
             return out

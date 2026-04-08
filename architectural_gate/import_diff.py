@@ -21,7 +21,16 @@ def _lines_for_path(content: str | None, language: str) -> set[str]:
         if lang in ("python", "py"):
             if s.startswith("import ") or s.startswith("from "):
                 out.add(s)
-        elif lang in ("javascript", "js", "typescript", "ts", "tsx", "jsx", "node", "nodejs"):
+        elif lang in (
+            "javascript",
+            "js",
+            "typescript",
+            "ts",
+            "tsx",
+            "jsx",
+            "node",
+            "nodejs",
+        ):
             if (
                 s.startswith("import ")
                 or s.startswith("export ")

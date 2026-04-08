@@ -15,7 +15,10 @@ from architectural_gate.dead_code_checker import count_dead_code_rule_types
 from architectural_gate.dependency_checker import count_new_dependencies
 from architectural_gate.import_diff import compute_import_diff
 from architectural_gate.models import GateResult, GateThresholds, RepoSnapshot
-from architectural_gate.scope_analyzer import SameDirectoryAdjacencyPolicy, compute_scope_metrics
+from architectural_gate.scope_analyzer import (
+    SameDirectoryAdjacencyPolicy,
+    compute_scope_metrics,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +122,11 @@ def load_task_config(
     if path.is_file():
         return _safe_yaml_dict(path.read_text(encoding="utf-8"))
     raw = str(task_config).strip()
-    if raw.startswith("{") or raw.startswith("architectural") or raw.startswith("architectural_gate:"):
+    if (
+        raw.startswith("{")
+        or raw.startswith("architectural")
+        or raw.startswith("architectural_gate:")
+    ):
         return _safe_yaml_dict(raw)
     return {}
 
@@ -206,7 +213,9 @@ class ArchitecturalGate:
 
         scope_pass = scope_score >= thresholds.scope_min
         blast_pass = blast_ratio >= thresholds.blast_ratio_min
-        api_pass = thresholds.allow_api_breaks or (api_surface_score >= thresholds.api_surface_min)
+        api_pass = thresholds.allow_api_breaks or (
+            api_surface_score >= thresholds.api_surface_min
+        )
         dependency_pass = thresholds.allow_new_dependencies or (
             new_deps <= thresholds.max_new_dependencies
         )
@@ -283,7 +292,9 @@ class ArchitecturalGate:
             gate_pass,
         )
 
-        return GateResult(architectural=architectural, failures=failures, raw_log=raw_log)
+        return GateResult(
+            architectural=architectural, failures=failures, raw_log=raw_log
+        )
 
 
 def evaluate_gate(

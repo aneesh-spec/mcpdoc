@@ -24,7 +24,9 @@ class GoAPIAdapter(LanguageAPIAdapter):
     def relevant_paths(self, snapshot_paths: set[str]) -> set[str]:
         return {p for p in snapshot_paths if p.endswith(".go")}
 
-    def extract_public_surface(self, rel_path: str, content: str | None) -> dict[str, Any]:
+    def extract_public_surface(
+        self, rel_path: str, content: str | None
+    ) -> dict[str, Any]:
         out: dict[str, Any] = {"path": rel_path, "exports": []}
         if not content:
             return out

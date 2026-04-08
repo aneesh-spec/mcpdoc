@@ -8,7 +8,11 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from architectural_gate.diff_utils import collect_paths_under_repo, filter_auto_generated_files, list_files_from_unified_diff
+from architectural_gate.diff_utils import (
+    collect_paths_under_repo,
+    filter_auto_generated_files,
+    list_files_from_unified_diff,
+)
 
 if TYPE_CHECKING:
     pass
@@ -40,14 +44,18 @@ class ScopeExpansionPolicy(ABC):
 class CreatorOnlyPolicy(ScopeExpansionPolicy):
     """Strict: only files explicitly modified in the creator patch."""
 
-    def allowed_files(self, creator_modified: set[str], repo_root: Path | None) -> set[str]:
+    def allowed_files(
+        self, creator_modified: set[str], repo_root: Path | None
+    ) -> set[str]:
         return set(creator_modified)
 
 
 class SameDirectoryAdjacencyPolicy(ScopeExpansionPolicy):
     """Creator files + all files in the same directories (reasonable adjacency)."""
 
-    def allowed_files(self, creator_modified: set[str], repo_root: Path | None) -> set[str]:
+    def allowed_files(
+        self, creator_modified: set[str], repo_root: Path | None
+    ) -> set[str]:
         allowed = set(creator_modified)
         dirs: set[str] = set()
         for f in creator_modified:
@@ -103,7 +111,9 @@ def compute_scope_metrics(
         outside = set(agent_files)
         detail["note"] = "empty_creator_patch"
         detail["files_outside_scope"] = sorted(outside)
-        detail["scope_score"] = 1.0 - (len(outside) / len(agent_files)) if agent_files else 1.0
+        detail["scope_score"] = (
+            1.0 - (len(outside) / len(agent_files)) if agent_files else 1.0
+        )
         return _finalize_scope_detail(detail)
 
     allowed = policy.allowed_files(creator_files, repo_root)
@@ -137,5 +147,11 @@ def compute_scope_ratio(
     exclude_patterns: tuple[str, ...] = (),
 ) -> tuple[float, dict]:
     """Returns (scope_score, detail) for backward compatibility."""
-    detail = compute_scope_metrics(agent_patch, creator_patch, repo_root, policy=policy, exclude_patterns=exclude_patterns)
+    detail = compute_scope_metrics(
+        agent_patch,
+        creator_patch,
+        repo_root,
+        policy=policy,
+        exclude_patterns=exclude_patterns,
+    )
     return float(detail["scope_score"]), detail

@@ -32,7 +32,9 @@ def _func_sig(node: ast.AsyncFunctionDef | ast.FunctionDef) -> dict[str, Any]:
 def _class_public_methods(cls: ast.ClassDef) -> dict[str, Any]:
     methods: dict[str, Any] = {}
     for item in cls.body:
-        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and _is_public(item.name):
+        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and _is_public(
+            item.name
+        ):
             methods[item.name] = _func_sig(item)
     return methods
 
@@ -61,7 +63,9 @@ class PythonAPIAdapter(LanguageAPIAdapter):
             logger.debug("python parse error %s: %s", rel_path, e)
             return {"path": rel_path, "error": str(e), "functions": {}, "classes": {}}
         for node in tree.body:
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and _is_public(node.name):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and _is_public(
+                node.name
+            ):
                 out["functions"][node.name] = _func_sig(node)
             elif isinstance(node, ast.ClassDef) and _is_public(node.name):
                 out["classes"][node.name] = {
@@ -83,14 +87,16 @@ class PythonAPIAdapter(LanguageAPIAdapter):
             if name not in a_funcs:
                 breaks.append(f"{path}: removed public function `{name}`")
             else:
-                if (b_funcs[name].get("args") or []) != (a_funcs[name].get("args") or []):
+                if (b_funcs[name].get("args") or []) != (
+                    a_funcs[name].get("args") or []
+                ):
                     breaks.append(f"{path}: signature change on `{name}`")
         for name in b_cls:
             if name not in a_cls:
                 breaks.append(f"{path}: removed public class `{name}`")
             else:
-                bm = (b_cls[name].get("methods") or {})
-                am = (a_cls[name].get("methods") or {})
+                bm = b_cls[name].get("methods") or {}
+                am = a_cls[name].get("methods") or {}
                 for m in bm:
                     if m not in am:
                         breaks.append(f"{path}: removed public method `{name}.{m}`")

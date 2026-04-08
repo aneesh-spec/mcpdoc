@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from architectural_gate.diff_utils import total_changed_loc, total_changed_loc_filtered
+from architectural_gate.diff_utils import total_changed_loc_filtered
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +22,12 @@ def compute_blast_metrics(
     Auto-generated files are excluded from LOC counting when exclude_patterns are set or
     by default via AUTO_GENERATED_PATTERNS.
     """
-    agent_loc, agent_excluded = total_changed_loc_filtered(agent_patch, exclude_patterns)
-    creator_ref_loc, creator_excluded = total_changed_loc_filtered(creator_patch, exclude_patterns)
+    agent_loc, agent_excluded = total_changed_loc_filtered(
+        agent_patch, exclude_patterns
+    )
+    creator_ref_loc, creator_excluded = total_changed_loc_filtered(
+        creator_patch, exclude_patterns
+    )
 
     detail: dict = {
         "agent_loc": agent_loc,
@@ -56,4 +60,6 @@ def compute_blast_ratio(
     exclude_patterns: tuple[str, ...] = (),
 ) -> tuple[float, dict]:
     """Legacy name: same as compute_blast_metrics (new semantic)."""
-    return compute_blast_metrics(agent_patch, creator_patch, exclude_patterns=exclude_patterns)
+    return compute_blast_metrics(
+        agent_patch, creator_patch, exclude_patterns=exclude_patterns
+    )

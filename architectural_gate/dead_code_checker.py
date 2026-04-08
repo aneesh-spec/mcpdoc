@@ -117,7 +117,11 @@ def _run_cargo_clippy_messages(cwd: Path) -> tuple[list[dict], str | None]:
         msg = obj.get("message")
         if isinstance(msg, dict) and msg.get("code") is not None:
             messages.append(obj)
-    err = None if proc.returncode in (0, 1) or messages else (proc.stderr or f"exit {proc.returncode}")
+    err = (
+        None
+        if proc.returncode in (0, 1) or messages
+        else (proc.stderr or f"exit {proc.returncode}")
+    )
     return messages, err
 
 
@@ -152,10 +156,16 @@ def count_dead_code_rule_types(
     if lang in ("python", "py"):
         if not root or not root.is_dir():
             detail["note"] = "python_dead_code_skipped_no_filesystem_root"
-            detail["hint"] = "Use RepoSnapshot(after_root=...) or before_root for Ruff; inline-only maps cannot run workspace lint."
+            detail["hint"] = (
+                "Use RepoSnapshot(after_root=...) or before_root for Ruff; inline-only maps cannot run workspace lint."
+            )
             return 0, detail
         detail["tool"] = "ruff"
-        cfg = ruff_config if ruff_config and ruff_config.is_file() else DEFAULT_RUFF_CONFIG
+        cfg = (
+            ruff_config
+            if ruff_config and ruff_config.is_file()
+            else DEFAULT_RUFF_CONFIG
+        )
         detail["config_path"] = str(cfg)
         findings, err = _run_ruff_json(root, cfg)
         if err:
@@ -178,7 +188,9 @@ def count_dead_code_rule_types(
             detail["note"] = "go_dead_code_skipped_no_go_mod"
             return 0, detail
         detail["tool"] = "staticcheck"
-        detail["config_note"] = "Pin staticcheck version in CI; optional golangci-lint overlay"
+        detail["config_note"] = (
+            "Pin staticcheck version in CI; optional golangci-lint overlay"
+        )
         findings, err = _run_staticcheck_json(root)
         if err:
             detail["error"] = err

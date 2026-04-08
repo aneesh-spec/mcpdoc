@@ -459,6 +459,7 @@ dependencies = [
     { name = "markdownify" },
     { name = "mcp", extra = ["cli"] },
     { name = "pyyaml" },
+    { name = "ruff" },
 ]
 
 [package.dev-dependencies]
@@ -478,6 +479,7 @@ requires-dist = [
     { name = "markdownify", specifier = ">=1.1.0" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.4.1" },
     { name = "pyyaml", specifier = ">=6.0.1" },
+    { name = "ruff", specifier = ">=0.4.0" },
 ]
 
 [package.metadata.requires-dev]
