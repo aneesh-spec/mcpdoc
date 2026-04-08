@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  actions: write # upload-artifact needs this when permissions are explicit
 
 jobs:
   run-architecture-gate:
