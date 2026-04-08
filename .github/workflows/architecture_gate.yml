@@ -1,3 +1,7 @@
+# Compares **initial** (baseline) vs **changed** trees. API, deps, and dead-code use that
+# before/after snapshot; the change patch is built with `git diff --no-index` between those dirs.
+# Writes full JSON (architectural + raw_log + failures) to ARCH_GATE_JSON_LOG and uploads it.
+
 name: Architecture Gate
 
 on:
@@ -13,16 +17,42 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install mcpdoc (editable, includes architectural_gate)
+      - name: Install mcpdoc (includes architectural_gate)
         run: pip install -e .
 
-      - name: Run Architecture Gate
+      - name: Materialize initial vs changed trees
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ARCH_GATE_JSON_LOG=${GITHUB_WORKSPACE}/architectural-gate-log.json" >> "${GITHUB_ENV}"
+          I="${RUNNER_TEMP}/arch-gate-initial"
+          C="${RUNNER_TEMP}/arch-gate-changed"
+          rm -rf "$I" "$C"
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          git fetch --no-tags --depth=50 origin "${BASE_SHA}" "${HEAD_SHA}" 2>/dev/null || git fetch --no-tags --depth=0
+          git worktree add "$I" "${BASE_SHA}"
+          git worktree add "$C" "${HEAD_SHA}"
+          echo "ARCH_GATE_REPO_INITIAL=${I}" >> "${GITHUB_ENV}"
+          echo "ARCH_GATE_REPO_CHANGED=${C}" >> "${GITHUB_ENV}"
+
+      - name: Run Architectural Gate
         run: python -m architectural_gate
+
+      - name: Upload gate log
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: architectural-gate-log
+          path: architectural-gate-log.json
+          if-no-files-found: ignore

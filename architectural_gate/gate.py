@@ -26,6 +26,78 @@ FAIL_DEP = "arch_dependency_violation"
 FAIL_DEAD = "arch_dead_code_violation"
 
 
+def _repo_snapshot_mode(snapshot: RepoSnapshot) -> str:
+    """How API/deps/dead-code snapshot is bound to disk or inline maps."""
+    if snapshot.before_root and snapshot.after_root:
+        return "initial_vs_changed"
+    if snapshot.after_root:
+        return "changed_only"
+    if snapshot.before_root:
+        return "initial_only"
+    if snapshot.before_files is not None or snapshot.after_files is not None:
+        return "inline_file_maps"
+    return "empty"
+
+
+def _evaluation_block(
+    self_reference: bool,
+    repo_snapshot: RepoSnapshot,
+) -> dict[str, Any]:
+    """
+    Documents how metrics map to the spec: conjunctive checks, initial-vs-PR data flow,
+    and when scope/blast use a separate creator reference patch.
+    """
+    snap_mode = _repo_snapshot_mode(repo_snapshot)
+    return {
+        "conjunctive_thresholds": True,
+        "gate_pass_requires_all_checks": True,
+        "repo_snapshot_mode": snap_mode,
+        "metrics_basis": {
+            "scope": (
+                "unified_diff: agent paths vs allowed set from creator reference + adjacency "
+                "(dynamic from change patch; repo_root scopes directory expansion)"
+            ),
+            "blast_ratio": (
+                "unified_diff: creator_ref_loc / agent_loc (capped); both from patch text, dynamic per run"
+            ),
+            "api_surface": (
+                "repo snapshot: breaking public API changes comparing before vs after content "
+                "(dynamic when initial_vs_changed)"
+            ),
+            "new_dependencies": (
+                "repo snapshot: dependency names in known manifests, after minus before "
+                "(dynamic when initial_vs_changed)"
+            ),
+            "dead_code": (
+                "after-tree linter (or before if no after_root): distinct rule codes vs threshold "
+                "(dynamic on changed tree)"
+            ),
+            "import_diff": (
+                "repo snapshot + paths touched in scope detail: import delta for touched files"
+            ),
+        },
+        "scope_blast_creator_reference": (
+            "change_patch_equals_creator_reference"
+            if self_reference
+            else "external_creator_patch"
+        ),
+        "scope_blast_note": (
+            "With self-reference, creator and agent patches are the same unified diff (e.g. "
+            "initial→PR only). Scope and blast scores are neutral vs that single change; "
+            "set a separate creator patch for creator-relative scope/blast (benchmarks)."
+            if self_reference
+            else "Creator patch differs from agent patch; scope and blast are relative to that reference.",
+        ),
+        "failure_tags": {
+            "scope": FAIL_SCOPE,
+            "blast": FAIL_BLAST,
+            "api": FAIL_API,
+            "dependencies": FAIL_DEP,
+            "dead_code": FAIL_DEAD,
+        },
+    }
+
+
 def _safe_yaml_dict(text: str) -> dict[str, Any]:
     """Parse YAML; invalid or non-dict input yields {} so evaluate() never crashes."""
     try:
@@ -53,7 +125,13 @@ def load_task_config(
 
 
 class ArchitecturalGate:
-    """Evaluates agent_patch vs creator_patch with repo snapshot and language context."""
+    """Evaluates unified-diff metrics (scope, blast) and repo-snapshot metrics (API, deps, dead code).
+
+    With ``RepoSnapshot(before_root=..., after_root=...)``, API and dependencies compare **initial
+    vs changed** trees dynamically. Scope and blast use the agent/creator patch strings; when only
+    an initial→changed diff exists, use ``self_reference=True`` so both sides match that patch, or
+    supply a separate creator patch for reference-relative scope/blast.
+    """
 
     def __init__(
         self,
@@ -71,7 +149,14 @@ class ArchitecturalGate:
         repo_snapshot: RepoSnapshot,
         language: str = "python",
         repo_root: Path | None = None,
+        self_reference: bool = False,
     ) -> GateResult:
+        """If ``self_reference`` is True, creator_patch is ignored and set equal to agent_patch
+        (scope/blast are vacuously satisfied; API/deps/dead-code still apply). Used when CI only
+        has the current change, not a separate reference patch.
+        """
+        if self_reference:
+            creator_patch = agent_patch
         cfg_raw = load_task_config(task_config)
         thresholds, overrides = GateThresholds.from_task_config(cfg_raw)
 
@@ -143,6 +228,7 @@ class ArchitecturalGate:
         if not dead_code_pass:
             failures.append(FAIL_DEAD)
 
+        # Public JSON schema for `architectural`: fixed keys / order; values are always dynamic.
         architectural: dict[str, Any] = {
             "scope_score": scope_score,
             "blast_ratio": float(blast_ratio),
@@ -164,6 +250,8 @@ class ArchitecturalGate:
         }
 
         raw_log: dict[str, Any] = {
+            "reference_mode": "self" if self_reference else "dual",
+            "evaluation": _evaluation_block(self_reference, repo_snapshot),
             "thresholds_default": {
                 "scope_min": 0.7,
                 "blast_ratio_min": 0.5,
@@ -207,6 +295,7 @@ def evaluate_gate(
     repo_root: Path | None = None,
     scope_policy: Any | None = None,
     ruff_config: Path | None = None,
+    self_reference: bool = False,
 ) -> GateResult:
     """Functional entrypoint."""
     gate = ArchitecturalGate(scope_policy=scope_policy, ruff_config=ruff_config)
@@ -217,9 +306,10 @@ def evaluate_gate(
         repo_snapshot,
         language=language,
         repo_root=repo_root,
+        self_reference=self_reference,
     )
 
 
 def result_to_json(gr: GateResult) -> str:
-    """Serialize to exact `architectural` output schema."""
+    """Serialize public output: top-level ``architectural`` only, stable schema (dynamic values)."""
     return json.dumps({"architectural": gr.architectural}, indent=2)
