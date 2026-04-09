@@ -225,7 +225,9 @@ class GateThresholds:
         max_new = _int("max_new_dependencies", defaults.max_new_dependencies)
         max_dead = _int("max_dead_code", defaults.max_dead_code)
 
-        allow_new = bool(arch.get("allow_new_dependencies", defaults.allow_new_dependencies))
+        allow_new = bool(
+            arch.get("allow_new_dependencies", defaults.allow_new_dependencies)
+        )
         allow_api = bool(arch.get("allow_api_breaks", defaults.allow_api_breaks))
 
         raw_excl = arch.get("exclude_patterns") or []

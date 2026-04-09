@@ -123,15 +123,13 @@ def _evaluation_block(
                 "N/A in Phase A — scope_score forced to 1.0 (no creator reference). "
                 "Phase B: agent file paths vs allowed set from creator reference + adjacency policy."
                 if is_phase_a
-                else
-                "Phase B: agent file paths vs allowed set from creator reference + adjacency policy."
+                else "Phase B: agent file paths vs allowed set from creator reference + adjacency policy."
             ),
             "blast_ratio": (
                 "N/A in Phase A — blast_ratio forced to 1.0 (no creator reference). "
                 "Phase B: min(1.0, creator_ref_loc / agent_loc)."
                 if is_phase_a
-                else
-                "Phase B: min(1.0, creator_ref_loc / agent_loc) from patch LOC counts."
+                else "Phase B: min(1.0, creator_ref_loc / agent_loc) from patch LOC counts."
             ),
             "api_surface": (
                 "Repo snapshot: breaking public API changes comparing before vs after content."
@@ -150,8 +148,7 @@ def _evaluation_block(
             "Phase A: creator_patch is set equal to agent_patch internally. "
             "scope_score and blast_ratio are always 1.0 and do not contribute to gate_pass."
             if is_phase_a
-            else
-            "Phase B: creator_patch is the frozen human reference from Phase A. "
+            else "Phase B: creator_patch is the frozen human reference from Phase A. "
             "scope and blast failures may indicate approach divergence — review before "
             "treating as hard failures."
         ),
@@ -386,7 +383,9 @@ class ArchitecturalGate:
         )
         dead_code_pass = dead_n <= thresholds.max_dead_code
 
-        gate_pass = all((scope_pass, blast_pass, api_pass, dependency_pass, dead_code_pass))
+        gate_pass = all(
+            (scope_pass, blast_pass, api_pass, dependency_pass, dead_code_pass)
+        )
 
         failures: list[str] = []
         if not scope_pass:
