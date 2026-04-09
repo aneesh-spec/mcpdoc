@@ -13,8 +13,8 @@
 #   ~ scope_score        — N/A in Phase A
 #   ~ blast_ratio        — N/A in Phase A
 #
-# ARCH_GATE_CREATOR_DIFF is intentionally NOT set, which triggers Phase A mode
-# in python -m architectural_gate.
+# The architectural_gate package is installed from amanchaudhary-ops/Merge-Bench-Scripts (central repo).
+# This workflow file is the only architectural gate artifact that lives in each task repo.
 
 name: Architecture Gate — Phase A (Human PR)
 
@@ -32,18 +32,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout task repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Checkout Architectural_Gate (architectural_gate source)
+        uses: actions/checkout@v4
+        with:
+          repository: amanchaudhary-ops/Merge-Bench-Scripts
+          path: Merge-Bench-Scripts
+          token: ${{ secrets.MERGE_BENCH_TOKEN }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install mcpdoc (includes architectural_gate)
-        run: pip install -e .
+      - name: Install architectural_gate from Merge-Bench-Scripts
+        run: pip install ./Merge-Bench-Scripts
 
       - name: Materialize initial vs changed trees
         shell: bash

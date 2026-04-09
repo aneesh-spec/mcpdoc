@@ -1,6 +1,0 @@
-# Reference for Rust/Clippy dead-code style checks.
-# Copy to your crate root as `clippy.toml` to align local runs with CI, or rely on defaults.
-# https://doc.rust-lang.org/clippy/configuration.html
-
-# Example (uncomment to tighten):
-# cognitive-complexity-threshold = 30
