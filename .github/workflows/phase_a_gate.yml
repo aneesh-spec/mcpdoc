@@ -42,6 +42,7 @@ jobs:
         with:
           repository: aneesh-spec/Merge-Bench-Scripts
           path: Merge-Bench-Scripts
+          token: ${{ secrets.MERGE_BENCH_TOKEN }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
