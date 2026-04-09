@@ -1,4 +1,46 @@
-"""Architectural Gate orchestrator: metrics, thresholds, JSON result, audit logging."""
+"""Architectural Gate orchestrator: metrics, thresholds, JSON result, audit logging.
+
+Two-phase evaluation model
+--------------------------
+Phase A — Human PR validation (EvaluationMode.PHASE_A)
+    Called when a human annotator opens a PR with a creator patch + F2P tests.
+    No agent patch exists yet. The PR diff IS the only patch available.
+
+    Meaningful checks: api_surface_score, new_dependencies_count, dead_code_count.
+    N/A checks:        scope_score = 1.0, blast_ratio = 1.0 (no reference to compare).
+
+    Example invocation:
+        gate.evaluate(
+            agent_patch=pr_diff,   # the human's PR diff
+            creator_patch="",      # ignored in Phase A
+            task_config=task_yaml,
+            repo_snapshot=RepoSnapshot(before_root=base_tree, after_root=pr_tree),
+            mode=EvaluationMode.PHASE_A,
+        )
+
+Phase B — Agent patch evaluation (EvaluationMode.PHASE_B)
+    Called when an AI agent produces a patch for a frozen task from Phase A.
+    The creator patch from Phase A is the reference.
+
+    Meaningful checks: all five (scope, blast, api, new_deps, dead_code).
+
+    Example invocation:
+        gate.evaluate(
+            agent_patch=agent_diff,
+            creator_patch=creator_diff,   # frozen from Phase A
+            task_config=task_yaml,
+            repo_snapshot=RepoSnapshot(before_root=base_tree, after_root=agent_tree),
+            mode=EvaluationMode.PHASE_B,
+        )
+
+Failure tags
+------------
+    arch_scope_violation      — scope_score below threshold (Phase B only)
+    arch_blast_violation      — blast_ratio below threshold (Phase B only)
+    arch_api_violation        — api_surface_score below threshold
+    arch_dependency_violation — new_dependencies_count above threshold
+    arch_dead_code_violation  — dead_code_count above threshold
+"""
 
 from __future__ import annotations
 
@@ -14,7 +56,12 @@ from architectural_gate.blast_analyzer import compute_blast_metrics
 from architectural_gate.dead_code_checker import count_dead_code_rule_types
 from architectural_gate.dependency_checker import count_new_dependencies
 from architectural_gate.import_diff import compute_import_diff
-from architectural_gate.models import GateResult, GateThresholds, RepoSnapshot
+from architectural_gate.models import (
+    EvaluationMode,
+    GateResult,
+    GateThresholds,
+    RepoSnapshot,
+)
 from architectural_gate.scope_analyzer import (
     SameDirectoryAdjacencyPolicy,
     compute_scope_metrics,
@@ -30,7 +77,16 @@ FAIL_DEAD = "arch_dead_code_violation"
 
 
 def _repo_snapshot_mode(snapshot: RepoSnapshot) -> str:
-    """How API/deps/dead-code snapshot is bound to disk or inline maps."""
+    """Return a string tag describing which before/after repo roots are available.
+
+    Used in the evaluation block log for audit purposes. Does not affect metric
+    computation. Possible values:
+        "initial_vs_changed" — both before and after trees present (full comparison)
+        "changed_only"       — only after tree present (before state treated as empty)
+        "initial_only"       — only before tree present
+        "inline_file_maps"   — inline path->content maps provided instead of roots
+        "empty"              — no snapshot data at all
+    """
     if snapshot.before_root and snapshot.after_root:
         return "initial_vs_changed"
     if snapshot.after_root:
@@ -43,53 +99,61 @@ def _repo_snapshot_mode(snapshot: RepoSnapshot) -> str:
 
 
 def _evaluation_block(
-    self_reference: bool,
+    mode: EvaluationMode,
     repo_snapshot: RepoSnapshot,
 ) -> dict[str, Any]:
-    """
-    Documents how metrics map to the spec: conjunctive checks, initial-vs-PR data flow,
-    and when scope/blast use a separate creator reference patch.
+    """Build the evaluation metadata block embedded in raw_log.
+
+    Documents the evaluation mode, metric data flows, and failure tag names.
+    This block is for human review and audit — it does not affect gate_pass.
+
+    Args:
+        mode: PHASE_A or PHASE_B (determines scope/blast N/A note).
+        repo_snapshot: Used to determine which snapshot mode is active.
     """
     snap_mode = _repo_snapshot_mode(repo_snapshot)
+    is_phase_a = mode == EvaluationMode.PHASE_A
     return {
+        "evaluation_mode": mode.value,
         "conjunctive_thresholds": True,
         "gate_pass_requires_all_checks": True,
         "repo_snapshot_mode": snap_mode,
         "metrics_basis": {
             "scope": (
-                "unified_diff: agent paths vs allowed set from creator reference + adjacency "
-                "(dynamic from change patch; repo_root scopes directory expansion)"
+                "N/A in Phase A — scope_score forced to 1.0 (no creator reference). "
+                "Phase B: agent file paths vs allowed set from creator reference + adjacency policy."
+                if is_phase_a
+                else
+                "Phase B: agent file paths vs allowed set from creator reference + adjacency policy."
             ),
             "blast_ratio": (
-                "unified_diff: creator_ref_loc / agent_loc (capped); both from patch text, dynamic per run"
+                "N/A in Phase A — blast_ratio forced to 1.0 (no creator reference). "
+                "Phase B: min(1.0, creator_ref_loc / agent_loc)."
+                if is_phase_a
+                else
+                "Phase B: min(1.0, creator_ref_loc / agent_loc) from patch LOC counts."
             ),
             "api_surface": (
-                "repo snapshot: breaking public API changes comparing before vs after content "
-                "(dynamic when initial_vs_changed)"
+                "Repo snapshot: breaking public API changes comparing before vs after content."
             ),
             "new_dependencies": (
-                "repo snapshot: dependency names in known manifests, after minus before "
-                "(dynamic when initial_vs_changed)"
+                "Repo snapshot: dependency names in known manifests, after minus before set."
             ),
             "dead_code": (
-                "after-tree linter (or before if no after_root): distinct rule codes vs threshold "
-                "(dynamic on changed tree)"
+                "After-tree linter: distinct linter rule codes vs threshold."
             ),
             "import_diff": (
-                "repo snapshot + paths touched in scope detail: import delta for touched files"
+                "Repo snapshot + agent-touched files: import delta scoped to changed files."
             ),
         },
-        "scope_blast_creator_reference": (
-            "change_patch_equals_creator_reference"
-            if self_reference
-            else "external_creator_patch"
-        ),
         "scope_blast_note": (
-            "With self-reference, creator and agent patches are the same unified diff (e.g. "
-            "initial→PR only). Scope and blast scores are neutral vs that single change; "
-            "set a separate creator patch for creator-relative scope/blast (benchmarks)."
-            if self_reference
-            else "Creator patch differs from agent patch; scope and blast are relative to that reference.",
+            "Phase A: creator_patch is set equal to agent_patch internally. "
+            "scope_score and blast_ratio are always 1.0 and do not contribute to gate_pass."
+            if is_phase_a
+            else
+            "Phase B: creator_patch is the frozen human reference from Phase A. "
+            "scope and blast failures may indicate approach divergence — review before "
+            "treating as hard failures."
         ),
         "failure_tags": {
             "scope": FAIL_SCOPE,
@@ -102,7 +166,10 @@ def _evaluation_block(
 
 
 def _safe_yaml_dict(text: str) -> dict[str, Any]:
-    """Parse YAML; invalid or non-dict input yields {} so evaluate() never crashes."""
+    """Parse YAML text into a dict. Returns {} on any parse error or non-dict result.
+
+    Safe to call on untrusted input — never raises. Logs a warning on parse errors.
+    """
     try:
         data = yaml.safe_load(text)
     except yaml.YAMLError as e:
@@ -114,6 +181,22 @@ def _safe_yaml_dict(text: str) -> dict[str, Any]:
 def load_task_config(
     task_config: str | Path | Mapping[str, Any] | None,
 ) -> dict[str, Any]:
+    """Load task configuration from a file path, raw YAML string, or pre-parsed mapping.
+
+    Accepts three formats:
+        - Path or path string pointing to a YAML file on disk.
+        - Raw YAML string starting with "{", "architectural", or "architectural_gate:".
+        - A pre-parsed dict/Mapping (returned as-is).
+        - None (returns empty dict, all defaults apply).
+
+    Never raises — returns {} on any error so gate evaluation always proceeds.
+
+    Args:
+        task_config: YAML file path, raw YAML text, pre-parsed mapping, or None.
+
+    Returns:
+        Parsed configuration dict, or {} if input is invalid/missing.
+    """
     if task_config is None:
         return {}
     if isinstance(task_config, Mapping):
@@ -132,12 +215,44 @@ def load_task_config(
 
 
 class ArchitecturalGate:
-    """Evaluates unified-diff metrics (scope, blast) and repo-snapshot metrics (API, deps, dead code).
+    """Evaluates patches and repo snapshots against architectural quality thresholds.
 
-    With ``RepoSnapshot(before_root=..., after_root=...)``, API and dependencies compare **initial
-    vs changed** trees dynamically. Scope and blast use the agent/creator patch strings; when only
-    an initial→changed diff exists, use ``self_reference=True`` so both sides match that patch, or
-    supply a separate creator patch for reference-relative scope/blast.
+    Supports two evaluation modes (see EvaluationMode):
+        PHASE_A — Human PR validation. Only api, deps, dead_code checks are enforced.
+                  scope and blast are always 1.0 (N/A).
+        PHASE_B — Agent evaluation. All five checks are enforced.
+
+    Metrics computed
+    ----------------
+    scope_score (Phase B only):
+        Fraction of agent-touched files that fall within the allowed set derived from
+        the creator patch + adjacency policy.
+        Formula: 1 - |agent_files outside allowed| / |agent_files|
+        Threshold: >= scope_min (default 0.7)
+
+    blast_ratio (Phase B only):
+        How concise the agent's change was relative to the creator's reference.
+        Formula: min(1.0, creator_ref_loc / agent_loc)
+        Threshold: >= blast_ratio_min (default 0.5)
+        Example: creator wrote 100 LOC, agent wrote 300 LOC → 100/300 = 0.33 → FAIL
+
+    api_surface_score (both phases):
+        Fraction of public API interfaces that were not broken.
+        Formula: 1 - breaking_changes / total_interfaces
+        Threshold: >= api_surface_min (default 1.0, i.e. zero breaking changes)
+
+    new_dependencies_count (both phases):
+        Count of new external packages added vs baseline.
+        Threshold: <= max_new_dependencies (default 0)
+
+    dead_code_count (both phases):
+        Count of distinct linter rule codes triggered in the after-state tree.
+        Threshold: <= max_dead_code (default 2)
+
+    Args:
+        scope_policy: Pluggable adjacency policy for allowed-file expansion.
+                      Defaults to SameDirectoryAdjacencyPolicy (creator dirs + all files within).
+        ruff_config:  Optional path to a ruff config file for Python dead-code checks.
     """
 
     def __init__(
@@ -157,18 +272,51 @@ class ArchitecturalGate:
         language: str = "python",
         repo_root: Path | None = None,
         self_reference: bool = False,
+        mode: EvaluationMode | None = None,
     ) -> GateResult:
-        """If ``self_reference`` is True, creator_patch is ignored and set equal to agent_patch
-        (scope/blast are vacuously satisfied; API/deps/dead-code still apply). Used when CI only
-        has the current change, not a separate reference patch.
+        """Run all architectural checks and return a GateResult.
+
+        Args:
+            agent_patch:    Unified diff of the agent's changes (Phase B) or the
+                            human PR diff (Phase A).
+            creator_patch:  Unified diff of the creator's reference patch (Phase B only).
+                            Ignored in Phase A — pass "" or the same patch; it will be
+                            overridden internally.
+            task_config:    Task YAML with threshold overrides, or None for defaults.
+                            See load_task_config() for accepted formats.
+            repo_snapshot:  Before/after repo state for api, deps, dead-code checks.
+                            Provide before_root + after_root for full before/after comparison.
+            language:       Programming language for API and dead-code checks.
+                            Supported: "python", "javascript", "go", "rust".
+            repo_root:      Repo root used by SameDirectoryAdjacencyPolicy to expand
+                            allowed directories to all files within them.
+            self_reference: Deprecated. Pass mode=EvaluationMode.PHASE_A instead.
+                            If True and mode is None, treated as PHASE_A.
+            mode:           EvaluationMode.PHASE_A or PHASE_B. Takes precedence over
+                            self_reference when set.
+
+        Returns:
+            GateResult with:
+                .architectural — public JSON schema dict (always produced)
+                .failures      — list of failure tag strings
+                .raw_log       — full audit log for human review
         """
-        if self_reference:
+        # Resolve evaluation mode
+        if mode is None:
+            mode = EvaluationMode.PHASE_A if self_reference else EvaluationMode.PHASE_B
+        is_phase_a = mode == EvaluationMode.PHASE_A
+
+        # Phase A: force creator_patch == agent_patch so scope/blast formulas
+        # produce deterministic 1.0 values. The results are then overridden below
+        # to make the N/A intent explicit.
+        if is_phase_a:
             creator_patch = agent_patch
+
         cfg_raw = load_task_config(task_config)
         thresholds, overrides = GateThresholds.from_task_config(cfg_raw)
-
         exclude_patterns = thresholds.exclude_patterns
 
+        # --- Scope (Phase B meaningful; Phase A always 1.0) ---
         scope_detail = compute_scope_metrics(
             agent_patch,
             creator_patch,
@@ -176,33 +324,49 @@ class ArchitecturalGate:
             policy=self.scope_policy,
             exclude_patterns=exclude_patterns,
         )
-        scope_score = float(scope_detail["scope_score"])
 
+        # --- Blast (Phase B meaningful; Phase A always 1.0) ---
         blast_ratio, blast_detail = compute_blast_metrics(
             agent_patch, creator_patch, exclude_patterns=exclude_patterns
         )
         agent_loc = int(blast_detail["agent_loc"])
         creator_ref_loc = int(blast_detail["creator_ref_loc"])
 
+        # Phase A override: scope and blast are N/A — force to 1.0 regardless
+        # of what the analyzers computed (they ran on identical patches, so they
+        # would have returned 1.0 anyway, but we make this explicit).
+        if is_phase_a:
+            scope_score = 1.0
+            blast_ratio = 1.0
+            scope_detail["scope_score"] = 1.0
+            scope_detail["note"] = "phase_a_na"
+            blast_detail["note"] = "phase_a_na"
+        else:
+            scope_score = float(scope_detail["scope_score"])
+
+        # --- API surface (both phases) ---
         api_surface_score, _bc, _iface, api_detail = compute_api_surface_detailed(
             repo_snapshot,
             language,
         )
 
+        # --- New dependencies (both phases) ---
         new_deps, dep_detail = count_new_dependencies(repo_snapshot)
+
+        # --- Dead code (both phases) ---
         dead_n, dead_detail = count_dead_code_rule_types(
             repo_snapshot,
             language,
             ruff_config=self.ruff_config,
         )
 
-        # Scope import_diff to agent-touched files only (empty set => []; never use `set() or None`
-        # which wrongly widens to full-repo scan).
+        # --- Import diff (scoped to agent-touched files) ---
         agent_files_for_imports = set(scope_detail.get("agent_files") or [])
         import_diff = compute_import_diff(
             repo_snapshot, language, touched_files=agent_files_for_imports
         )
 
+        # --- Threshold evaluation ---
         thr_out = {
             "scope_min": thresholds.scope_min,
             "blast_ratio_min": thresholds.blast_ratio_min,
@@ -211,8 +375,9 @@ class ArchitecturalGate:
             "max_dead_code": thresholds.max_dead_code,
         }
 
-        scope_pass = scope_score >= thresholds.scope_min
-        blast_pass = blast_ratio >= thresholds.blast_ratio_min
+        # In Phase A, scope and blast always pass — thresholds are irrelevant for them.
+        scope_pass = True if is_phase_a else (scope_score >= thresholds.scope_min)
+        blast_pass = True if is_phase_a else (blast_ratio >= thresholds.blast_ratio_min)
         api_pass = thresholds.allow_api_breaks or (
             api_surface_score >= thresholds.api_surface_min
         )
@@ -221,9 +386,7 @@ class ArchitecturalGate:
         )
         dead_code_pass = dead_n <= thresholds.max_dead_code
 
-        gate_pass = all(
-            (scope_pass, blast_pass, api_pass, dependency_pass, dead_code_pass),
-        )
+        gate_pass = all((scope_pass, blast_pass, api_pass, dependency_pass, dead_code_pass))
 
         failures: list[str] = []
         if not scope_pass:
@@ -237,7 +400,7 @@ class ArchitecturalGate:
         if not dead_code_pass:
             failures.append(FAIL_DEAD)
 
-        # Public JSON schema for `architectural`: fixed keys / order; values are always dynamic.
+        # Public JSON schema — fixed keys and order; values are always dynamic.
         architectural: dict[str, Any] = {
             "scope_score": scope_score,
             "blast_ratio": float(blast_ratio),
@@ -259,8 +422,8 @@ class ArchitecturalGate:
         }
 
         raw_log: dict[str, Any] = {
-            "reference_mode": "self" if self_reference else "dual",
-            "evaluation": _evaluation_block(self_reference, repo_snapshot),
+            "evaluation_mode": mode.value,
+            "evaluation": _evaluation_block(mode, repo_snapshot),
             "thresholds_default": {
                 "scope_min": 0.7,
                 "blast_ratio_min": 0.5,
@@ -283,7 +446,8 @@ class ArchitecturalGate:
         }
 
         logger.info(
-            "ArchitecturalGate scope=%s blast=%s api=%s deps=%s dead=%s gate_pass=%s",
+            "ArchitecturalGate mode=%s scope=%s blast=%s api=%s deps=%s dead=%s gate_pass=%s",
+            mode.value,
             scope_score,
             blast_ratio,
             api_surface_score,
@@ -307,8 +471,13 @@ def evaluate_gate(
     scope_policy: Any | None = None,
     ruff_config: Path | None = None,
     self_reference: bool = False,
+    mode: EvaluationMode | None = None,
 ) -> GateResult:
-    """Functional entrypoint."""
+    """Functional entrypoint for the architectural gate. Equivalent to ArchitecturalGate().evaluate().
+
+    Prefer this for simple call sites that don't need to share a gate instance.
+    See ArchitecturalGate.evaluate() for full parameter documentation.
+    """
     gate = ArchitecturalGate(scope_policy=scope_policy, ruff_config=ruff_config)
     return gate.evaluate(
         agent_patch,
@@ -318,9 +487,15 @@ def evaluate_gate(
         language=language,
         repo_root=repo_root,
         self_reference=self_reference,
+        mode=mode,
     )
 
 
 def result_to_json(gr: GateResult) -> str:
-    """Serialize public output: top-level ``architectural`` only, stable schema (dynamic values)."""
+    """Serialize the public architectural output to JSON.
+
+    Only the ``architectural`` dict is included — raw_log and failures are
+    intentionally excluded from this output (they are for internal audit only).
+    The schema is stable: all keys are always present regardless of pass/fail.
+    """
     return json.dumps({"architectural": gr.architectural}, indent=2)

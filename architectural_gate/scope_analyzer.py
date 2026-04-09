@@ -75,10 +75,53 @@ def compute_scope_metrics(
     policy: ScopeExpansionPolicy | None = None,
     exclude_patterns: tuple[str, ...] = (),
 ) -> dict:
-    """
-    scope_score = 1 − files_extra / files_modified (files_extra = agent files outside allowed set).
-    files_modified: agent-touched paths; files_outside_scope: agent ∩ ¬allowed.
-    Auto-generated files are excluded from scoring.
+    """Compute scope_score: fraction of agent-touched files within the allowed set.
+
+    Phase relevance: PHASE_B only.
+        In Phase A (human PR, self-reference), gate.py sets creator_patch == agent_patch,
+        making allowed == agent_files and scope_score always 1.0. The gate then overrides
+        it with a "phase_a_na" note. This function's output is not used for pass/fail
+        decisions in Phase A.
+
+    Formula:
+        scope_score = 1 - |agent_files outside allowed_files| / |agent_files|
+
+        where allowed_files = policy.allowed_files(creator_files, repo_root).
+
+    Default policy (SameDirectoryAdjacencyPolicy):
+        Expands creator_files to include ALL files in the same directories as any
+        creator-touched file. This gives agents reasonable room to touch adjacent
+        files without scope violations.
+
+    Examples:
+        Creator touched: [src/cli.py, tests/test_cli.py]
+        Allowed (with SameDirectoryAdjacencyPolicy):
+            src/cli.py, src/main.py, src/splash.py, ...  (all files in src/)
+            tests/test_cli.py, tests/test_main.py, ...   (all files in tests/)
+
+        Agent touches [src/cli.py, tests/test_cli.py]:
+            outside = {} → scope_score = 1.0  (PASS)
+
+        Agent touches [src/cli.py, tests/test_cli.py, README.md]:
+            outside = {README.md} → scope_score = 1 - 1/3 = 0.67  (FAIL, threshold=0.7)
+
+        Agent touches [src/cli.py, src/main.py, tests/test_cli.py]:
+            src/main.py is in src/ → still allowed → scope_score = 1.0  (PASS)
+
+    Important: scope failures in Phase B may indicate a legitimately different approach
+    rather than scope creep. Review failure_mode_annotation before treating as hard fails.
+
+    Args:
+        agent_patch:      Unified diff of the agent's changes.
+        creator_patch:    Unified diff of the creator's reference patch.
+        repo_root:        Repo root for SameDirectoryAdjacencyPolicy directory expansion.
+                          Pass None to disable directory expansion (only creator files allowed).
+        policy:           Scope expansion policy. Defaults to SameDirectoryAdjacencyPolicy.
+        exclude_patterns: Extra glob patterns for auto-generated files to exclude from scoring.
+
+    Returns:
+        Detail dict with keys: scope_score, agent_files, creator_files, files_modified,
+        files_outside_scope, allowed_files_count, allowed_sample, policy, formula, note.
     """
     policy = policy or SameDirectoryAdjacencyPolicy()
     agent_files_raw = list_files_from_unified_diff(agent_patch)

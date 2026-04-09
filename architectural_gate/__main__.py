@@ -1,4 +1,53 @@
-"""Entry point for `python -m architectural_gate` (CI smoke / quick check)."""
+"""Entry point for ``python -m architectural_gate``.
+
+Detects evaluation mode from environment variables and runs the gate.
+
+Two-phase usage
+---------------
+
+Phase A — Human PR validation
+    Set when ARCH_GATE_CREATOR_DIFF is NOT provided.
+    scope_score and blast_ratio are always 1.0 (N/A).
+    Only api_surface_score, new_dependencies_count, dead_code_count are enforced.
+
+    Required env vars:
+        ARCH_GATE_REPO_INITIAL   Baseline repo tree (base branch checkout)
+        ARCH_GATE_REPO_CHANGED   Changed repo tree (PR head checkout)
+
+    Optional:
+        ARCH_GATE_CHANGE_DIFF    Unified diff file (auto-built from INITIAL vs CHANGED if omitted)
+        ARCH_GATE_TASK_CONFIG    Task YAML path (thresholds; defaults apply if omitted)
+        ARCH_GATE_JSON_LOG       Path to write JSON output (also printed to stdout)
+
+    Example (GitHub Actions Phase A job):
+        ARCH_GATE_REPO_INITIAL=/tmp/base ARCH_GATE_REPO_CHANGED=/tmp/pr python -m architectural_gate
+
+Phase B — Agent patch evaluation
+    Set when ARCH_GATE_CREATOR_DIFF IS provided.
+    All five checks are enforced: scope, blast, api, new_deps, dead_code.
+
+    Required env vars:
+        ARCH_GATE_CREATOR_DIFF   Path to creator unified diff (frozen from Phase A)
+        ARCH_GATE_CHANGE_DIFF    Path to agent unified diff
+        ARCH_GATE_REPO_INITIAL   Baseline repo tree
+        ARCH_GATE_REPO_CHANGED   Agent's changed repo tree
+
+    Optional:
+        ARCH_GATE_TASK_CONFIG    Task YAML path
+        ARCH_GATE_JSON_LOG       Path to write JSON output
+
+    Example:
+        ARCH_GATE_CREATOR_DIFF=creator.diff \\
+        ARCH_GATE_CHANGE_DIFF=agent.diff \\
+        ARCH_GATE_REPO_INITIAL=/tmp/base \\
+        ARCH_GATE_REPO_CHANGED=/tmp/agent \\
+        python -m architectural_gate
+
+Exit codes
+----------
+    0 — gate_pass is True
+    1 — gate_pass is False (one or more checks failed)
+"""
 
 from __future__ import annotations
 
@@ -8,11 +57,15 @@ import sys
 from pathlib import Path
 
 from architectural_gate.gate import ArchitecturalGate, result_to_json
-from architectural_gate.models import RepoSnapshot
+from architectural_gate.models import EvaluationMode, RepoSnapshot
 
 
 def _parse_repo_roots() -> tuple[Path | None, Path | None]:
-    """Initial (baseline) and changed trees — drives API / deps / dead-code before vs after."""
+    """Read ARCH_GATE_REPO_INITIAL and ARCH_GATE_REPO_CHANGED from env.
+
+    Returns (before_path, after_path). Either may be None if the env var is
+    unset or points to a non-existent directory.
+    """
     initial = os.environ.get("ARCH_GATE_REPO_INITIAL") or os.environ.get(
         "ARCH_GATE_REPO_BEFORE"
     )
@@ -29,6 +82,7 @@ def _parse_repo_roots() -> tuple[Path | None, Path | None]:
 
 
 def _repo_snapshot(before_p: Path | None, after_p: Path | None) -> RepoSnapshot:
+    """Build a RepoSnapshot from optional before/after directory paths."""
     if before_p and after_p:
         return RepoSnapshot(before_root=before_p, after_root=after_p)
     if after_p:
@@ -37,7 +91,11 @@ def _repo_snapshot(before_p: Path | None, after_p: Path | None) -> RepoSnapshot:
 
 
 def _unified_diff_from_dir_trees(before: Path, after: Path) -> str:
-    """Unified diff between two directory trees (uses ``git diff --no-index``)."""
+    """Build a unified diff between two directory trees using ``git diff --no-index``.
+
+    Exit code 1 from git diff means differences were found (not an error).
+    Returns the diff text, or "" if git is unavailable or trees are identical.
+    """
     proc = subprocess.run(
         [
             "git",
@@ -52,38 +110,13 @@ def _unified_diff_from_dir_trees(before: Path, after: Path) -> str:
         encoding="utf-8",
         errors="replace",
     )
-    # Exit 1 = differences; 0 = identical. stderr may contain warnings.
     return proc.stdout or ""
 
 
 def main() -> int:
-    """
-    Compare **initial repo state** to **changed** state, evaluate thresholds, print JSON.
-
-    Primary CI inputs (both directories = full before/after snapshot for API, deps, dead code):
-
-      ARCH_GATE_REPO_INITIAL   baseline tree (e.g. merge-base / base branch checkout)
-      ARCH_GATE_REPO_CHANGED   tree with edits (e.g. PR head); alias legacy: ARCH_GATE_REPO_ROOT
-
-    If both are set, the change patch is built with ``git diff --no-index`` unless you override
-    with a file below.
-
-    Optional unified diff file (overrides auto diff when set):
-
-      ARCH_GATE_CHANGE_DIFF    preferred
-      ARCH_GATE_AGENT_DIFF     same role if CHANGE_DIFF unset
-
-    Optional reference patch for creator-relative scope/blast (benchmarks):
-
-      ARCH_GATE_CREATOR_DIFF   if omitted → self-reference mode for scope/blast
-
-    Log file (same JSON as stdout — only ``{"architectural": ...}``):
-
-      ARCH_GATE_JSON_LOG       path to write that JSON
-
-      ARCH_GATE_TASK_CONFIG    task YAML path (optional)
-    """
+    """Detect evaluation mode and run the architectural gate. Returns exit code."""
     before_p, after_p = _parse_repo_roots()
+
     change_path = os.environ.get("ARCH_GATE_CHANGE_DIFF") or os.environ.get(
         "ARCH_GATE_AGENT_DIFF"
     )
@@ -91,6 +124,7 @@ def main() -> int:
     cfg = os.environ.get("ARCH_GATE_TASK_CONFIG")
     log_path = os.environ.get("ARCH_GATE_JSON_LOG")
 
+    # Build agent patch from file or by diffing the two repo trees.
     if change_path:
         agent_patch = Path(change_path).read_text(encoding="utf-8")
     elif before_p and after_p:
@@ -100,10 +134,16 @@ def main() -> int:
 
     has_work = bool(change_path) or (before_p is not None and after_p is not None)
 
-    self_ref = not creator_path
-    creator_patch = (
-        Path(creator_path).read_text(encoding="utf-8") if creator_path else ""
-    )
+    # Detect evaluation mode from presence of creator diff.
+    #   No ARCH_GATE_CREATOR_DIFF → Phase A (human PR, no agent reference).
+    #   ARCH_GATE_CREATOR_DIFF set → Phase B (agent patch vs creator reference).
+    if creator_path:
+        mode = EvaluationMode.PHASE_B
+        creator_patch = Path(creator_path).read_text(encoding="utf-8")
+    else:
+        mode = EvaluationMode.PHASE_A
+        creator_patch = ""  # overridden inside evaluate() for Phase A
+
     task_config = Path(cfg) if cfg else {}
     repo_root = after_p
     snap = _repo_snapshot(before_p, after_p)
@@ -116,10 +156,13 @@ def main() -> int:
             snap,
             language="python",
             repo_root=repo_root,
-            self_reference=self_ref,
+            mode=mode,
         )
     else:
-        r = ArchitecturalGate().evaluate("", "", {}, RepoSnapshot(), "python")
+        # No diff and no repo trees — emit a neutral Phase A result.
+        r = ArchitecturalGate().evaluate(
+            "", "", {}, RepoSnapshot(), "python", mode=EvaluationMode.PHASE_A
+        )
 
     payload = result_to_json(r)
     print(payload)
@@ -129,7 +172,7 @@ def main() -> int:
 
 
 def cli_entry_point() -> None:
-    """Console script entry point for `architecture-gate` (see pyproject [project.scripts])."""
+    """Console script entry point for ``architecture-gate`` (see pyproject [project.scripts])."""
     sys.exit(main())
 
 
